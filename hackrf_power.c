@@ -1258,6 +1258,7 @@ int main(int argc, char **argv)
           sleep(1);
 	  gpsWait++;
         }
+	fprintf(stderr,"Acquired gps..\n");
       }
 #endif
 
