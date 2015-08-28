@@ -66,13 +66,13 @@ static struct gps_data_t gpsdata;
 #define BUFFER_DUMP			(1<<12)
 
 #define AUTO_GAIN (-100)
-#define GAIN_LNA_DEFAULT	(16)
-#define GAIN_VGA_DEFAULT	(30)
+#define GAIN_LNA_DEFAULT	(32)
+#define GAIN_VGA_DEFAULT	(24)
 
 /*
  * Sample rates - these need to be adjusted for HackRF
  */
-#define MAXIMUM_RATE			2000000
+#define MAXIMUM_RATE			20000000
 #define MINIMUM_RATE			 2000000
 #define DEFAULT_TARGET			 2000000
 
@@ -167,6 +167,8 @@ struct misc_settings
 	int smoothing;
 	enum time_modes time_mode;
 };
+
+static int verbose = 0;
 
 /* 3000 is enough for 3GHz b/w worst case */
 #define MAX_TUNES	4000
@@ -878,7 +880,8 @@ void scanner(void)
 		retune(dev, ts->freq);
 
 		hackrf_read_sync(ts->buf8, buf_len, &n_read);
-		{
+
+		if ( verbose ) {
 		  int i;
 		  fprintf(stderr,"Samples: ");
 		  for(i = 0; i < 20; i++) {
@@ -1015,8 +1018,10 @@ void init_misc(struct misc_settings *ms)
 static void gps_quit_handler(int signum)
 {
     /* don't clutter the logs on Ctrl-C */
-    (void)gps_close(&gpsdata);
-    exit(0);
+  fprintf(stderr,"ABORT: Exiting GPS monitor...\n");
+  gps_stream(&gpsdata, WATCH_DISABLE, NULL);
+  gps_close(&gpsdata);
+  exit(0);
 }
 
 void *gps_thread(void *arg)
@@ -1035,24 +1040,32 @@ void *gps_thread(void *arg)
   (void)signal(SIGQUIT, gps_quit_handler);
   (void)signal(SIGINT, gps_quit_handler);
 
-  if (gps_open("localhost", "2947", gpsptr) != 0) {
+  while (gps_open("localhost", "2947", gpsptr) != 0) {
     (void)fprintf(stderr,
-		  "no gpsd running or network error: %d, %s\n",
+		  "no gpsd running or network error: %d, %s -- try again in 10s\n",
 		  errno, gps_errstr(errno));
-    exit(1);
+    sleep(10);
   }
 
-  (void)gps_stream(gpsptr, 0, NULL);
+  gps_stream(gpsptr, WATCH_ENABLE | WATCH_JSON, NULL);
 
   for (;;) {
     if (!gps_waiting(gpsptr, 5000000)) {
-      (void)fprintf(stderr, "error while waiting\n");
-      break;
+      (void)fprintf(stderr, "Timed out waiting for GPS\n");
     } else {
-      (void)gps_read(gpsptr);
-      // UPDATE GPS
+      if ( gps_read(gpsptr) == -1 ) {
+	fprintf(stderr,"Error reading GPS data\n");
+      }
+      fprintf(stderr,"Set lat / lon / el to %f, %f, %f\n",
+	      gpsdata.fix.latitude,
+	      gpsdata.fix.longitude,
+	      gpsdata.fix.altitude);
     }
   }
+  
+  fprintf(stderr,"Exiting GPS monitor...\n");
+
+  gps_stream(gpsptr, WATCH_DISABLE, NULL);
   (void)gps_close(gpsptr);
   return 0;
 }
